@@ -1,0 +1,2518 @@
+--[[
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                    CatHub V2.1                              ║
+    ║           Modern Executor UI for Roblox                     ║
+    ║                                                              ║
+    ║  Features:                                                   ║
+    ║  - Dynamic title: "CatHub V2.1 - (Game Name)"              ║
+    ║  - Draggable window with smooth animations                  ║
+    ║  - Multiple tabs (Player, Visuals, Spoofer, Misc)           ║
+    ║  - Toggle switches, sliders, color picker                   ║
+    ║  - Minimize/Close functionality                             ║
+    ║  - Resizable via corner grip                                ║
+    ║  - Hover effects and click feedback                         ║
+    ║  - Dark theme with cyan accent                              ║
+    ║  - Jump spoofer system for anti-detection                   ║
+    ╚══════════════════════════════════════════════════════════════╝
+]]
+
+-- ============================================================
+-- SERVICES
+-- ============================================================
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ============================================================
+-- FETCH GAME NAME DYNAMICALLY
+-- ============================================================
+local GameName = "Unknown Game"
+pcall(function()
+    local info = MarketplaceService:GetProductInfo(game.PlaceId)
+    if info and info.Name then
+        GameName = info.Name
+    end
+end)
+
+-- Fallback: try other methods if MarketplaceService fails
+if GameName == "Unknown Game" then
+    pcall(function()
+        if game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name then
+            GameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+        end
+    end)
+end
+
+-- Truncate long game names for display
+local DisplayGameName = GameName
+if #DisplayGameName > 30 then
+    DisplayGameName = DisplayGameName:sub(1, 27) .. "..."
+end
+
+local HubTitle = "CatHub V2.1 - " .. DisplayGameName
+local HubTitleShort = "CatHub V2.1"
+
+-- ============================================================
+-- CONFIGURATION / THEME
+-- ============================================================
+local Theme = {
+    Background = Color3.fromRGB(18, 18, 24),
+    BackgroundSecondary = Color3.fromRGB(24, 24, 32),
+    TitleBar = Color3.fromRGB(14, 14, 20),
+    Accent = Color3.fromRGB(0, 200, 255),
+    AccentDark = Color3.fromRGB(0, 140, 180),
+    AccentGlow = Color3.fromRGB(0, 220, 255),
+    AccentPurple = Color3.fromRGB(160, 80, 255),
+    CatPink = Color3.fromRGB(255, 120, 180),
+    Text = Color3.fromRGB(230, 230, 240),
+    TextDim = Color3.fromRGB(140, 140, 160),
+    TextMuted = Color3.fromRGB(90, 90, 110),
+    ButtonBg = Color3.fromRGB(30, 30, 42),
+    ButtonHover = Color3.fromRGB(40, 40, 55),
+    ToggleOff = Color3.fromRGB(50, 50, 65),
+    ToggleOn = Color3.fromRGB(0, 200, 255),
+    SliderBg = Color3.fromRGB(35, 35, 48),
+    SliderFill = Color3.fromRGB(0, 200, 255),
+    InputBg = Color3.fromRGB(25, 25, 35),
+    InputBorder = Color3.fromRGB(50, 50, 70),
+    TabInactive = Color3.fromRGB(28, 28, 38),
+    TabActive = Color3.fromRGB(0, 200, 255),
+    Shadow = Color3.fromRGB(0, 0, 0),
+    Success = Color3.fromRGB(0, 220, 120),
+    Error = Color3.fromRGB(255, 70, 70),
+    Warning = Color3.fromRGB(255, 200, 0),
+    Stealth = Color3.fromRGB(160, 80, 255),
+    CornerRadius = UDim.new(0, 8),
+    CornerRadiusSmall = UDim.new(0, 6),
+    CornerRadiusTiny = UDim.new(0, 4),
+    Font = Enum.Font.GothamMedium,
+    FontBold = Enum.Font.GothamBold,
+    FontLight = Enum.Font.Gotham,
+    AnimSpeed = 0.25,
+    AnimSpeedFast = 0.15,
+    AnimEasing = Enum.EasingStyle.Quint,
+}
+
+-- ============================================================
+-- STATE MANAGEMENT
+-- ============================================================
+local State = {
+    InfiniteJump = false,
+    SpeedBoost = false,
+    NoClip = false,
+    JumpSpoofer = {
+        Enabled = false,
+        Method = "Velocity",
+        SpoofStrength = 50,
+        GroundOffset = 0.5,
+        AntiDetectLevel = 3,
+        CooldownTime = 0.08,
+        LastJumpTime = 0,
+        IsInMatch = false,
+        JumpCount = 0,
+        SpoofedJumps = 0,
+        OriginalJumpPower = 50,
+        OriginalGravity = 196.2,
+        FakeGroundPart = nil,
+        PositionHistory = {},
+        VelocitySmoother = nil,
+        GyroStabilizer = nil,
+        NetworkOwnerSpoofed = false,
+        HeartbeatConnection = nil,
+        SteppedConnection = nil,
+        RenderConnection = nil,
+        AnimationTracks = {},
+        GroundRayParams = nil,
+        MaxHistorySize = 10,
+        InterpolationFrames = 3,
+        LastGroundPosition = nil,
+        LastGroundCFrame = nil,
+        AirTimeAccumulator = 0,
+        MaxSafeAirTime = 0.4,
+        DesyncActive = false,
+        DesyncOffset = Vector3.new(0, -3, 0),
+    },
+    FOV = 70,
+    Brightness = 1,
+    ESPColor = Color3.fromRGB(0, 200, 255),
+    Minimized = false,
+    CurrentTab = "Player",
+    WindowSize = UDim2.new(0, 580, 0, 520),
+    MinWindowSize = Vector2.new(440, 400),
+    MaxWindowSize = Vector2.new(800, 700),
+    Connections = {},
+    ESPObjects = {},
+}
+
+-- ============================================================
+-- UTILITY FUNCTIONS
+-- ============================================================
+
+local function SafeTween(instance, tweenInfo, properties)
+    local success, err = pcall(function()
+        local tween = TweenService:Create(instance, tweenInfo, properties)
+        tween:Play()
+        return tween
+    end)
+    if not success then
+        warn("[CatHub] Tween error: " .. tostring(err))
+    end
+end
+
+local function CreateTween(instance, duration, properties, easingStyle, easingDirection)
+    easingStyle = easingStyle or Theme.AnimEasing
+    easingDirection = easingDirection or Enum.EasingDirection.Out
+    duration = duration or Theme.AnimSpeed
+    local tweenInfo = TweenInfo.new(duration, easingStyle, easingDirection)
+    local tween = TweenService:Create(instance, tweenInfo, properties)
+    return tween
+end
+
+local function AddCorner(parent, radius)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = radius or Theme.CornerRadius
+    corner.Parent = parent
+    return corner
+end
+
+local function AddStroke(parent, color, thickness, transparency)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = color or Theme.Accent
+    stroke.Thickness = thickness or 1
+    stroke.Transparency = transparency or 0.8
+    stroke.Parent = parent
+    return stroke
+end
+
+local function AddPadding(parent, top, bottom, left, right)
+    local padding = Instance.new("UIPadding")
+    padding.PaddingTop = UDim.new(0, top or 8)
+    padding.PaddingBottom = UDim.new(0, bottom or 8)
+    padding.PaddingLeft = UDim.new(0, left or 8)
+    padding.PaddingRight = UDim.new(0, right or 8)
+    padding.Parent = parent
+    return padding
+end
+
+local function AddGradient(parent, colorStart, colorEnd, rotation)
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, colorStart or Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, colorEnd or Color3.fromRGB(200, 200, 200)),
+    })
+    gradient.Rotation = rotation or 90
+    gradient.Parent = parent
+    return gradient
+end
+
+local function CreateRipple(button, position)
+    pcall(function()
+        local ripple = Instance.new("Frame")
+        ripple.Name = "Ripple"
+        ripple.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        ripple.BackgroundTransparency = 0.7
+        ripple.BorderSizePixel = 0
+        ripple.ZIndex = button.ZIndex + 1
+        local absPos = button.AbsolutePosition
+        local relX = position.X - absPos.X
+        local relY = position.Y - absPos.Y
+        ripple.Position = UDim2.new(0, relX - 5, 0, relY - 5)
+        ripple.Size = UDim2.new(0, 10, 0, 10)
+        ripple.Parent = button
+        AddCorner(ripple, UDim.new(1, 0))
+        local maxSize = math.max(button.AbsoluteSize.X, button.AbsoluteSize.Y) * 2.5
+        local tween = CreateTween(ripple, 0.5, {
+            Size = UDim2.new(0, maxSize, 0, maxSize),
+            Position = UDim2.new(0, relX - maxSize / 2, 0, relY - maxSize / 2),
+            BackgroundTransparency = 1,
+        })
+        tween:Play()
+        tween.Completed:Connect(function() ripple:Destroy() end)
+    end)
+end
+
+local function CleanupConnections()
+    for _, conn in pairs(State.Connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    State.Connections = {}
+end
+
+local function CleanupESP()
+    for _, obj in pairs(State.ESPObjects) do
+        pcall(function() obj:Destroy() end)
+    end
+    State.ESPObjects = {}
+end
+
+-- ============================================================
+-- JUMP SPOOFER ENGINE
+-- ============================================================
+
+local JumpSpoofer = {}
+
+function JumpSpoofer.InitRayParams()
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.RespectCanCollide = true
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            params.FilterDescendantsInstances = {char}
+        end
+    end)
+    State.JumpSpoofer.GroundRayParams = params
+end
+
+function JumpSpoofer.IsGrounded()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local params = State.JumpSpoofer.GroundRayParams
+    if not params then
+        JumpSpoofer.InitRayParams()
+        params = State.JumpSpoofer.GroundRayParams
+    end
+    pcall(function() params.FilterDescendantsInstances = {char} end)
+    local result = workspace:Raycast(hrp.Position, Vector3.new(0, -4, 0), params)
+    return result ~= nil
+end
+
+function JumpSpoofer.GetGroundPosition()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local params = State.JumpSpoofer.GroundRayParams
+    if not params then
+        JumpSpoofer.InitRayParams()
+        params = State.JumpSpoofer.GroundRayParams
+    end
+    pcall(function() params.FilterDescendantsInstances = {char} end)
+    local result = workspace:Raycast(hrp.Position + Vector3.new(0, 2, 0), Vector3.new(0, -50, 0), params)
+    if result then
+        return result.Position, result.Normal, result.Instance
+    end
+    return nil
+end
+
+function JumpSpoofer.RecordPosition(position)
+    local history = State.JumpSpoofer.PositionHistory
+    table.insert(history, { Position = position, Time = tick() })
+    while #history > State.JumpSpoofer.MaxHistorySize do
+        table.remove(history, 1)
+    end
+end
+
+function JumpSpoofer.SpoofHumanoidState()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    pcall(function()
+        humanoid:ChangeState(Enum.HumanoidStateType.Running)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+    end)
+end
+
+function JumpSpoofer.RestoreHumanoidState()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    pcall(function()
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+    end)
+end
+
+function JumpSpoofer.SuppressJumpAnimation()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    pcall(function()
+        local animator = humanoid:FindFirstChildOfClass("Animator")
+        if not animator then return end
+        local tracks = animator:GetPlayingAnimationTracks()
+        for _, track in ipairs(tracks) do
+            local animName = ""
+            pcall(function() animName = track.Animation.AnimationId:lower() end)
+            pcall(function() animName = animName .. track.Name:lower() end)
+            if animName:find("jump") or animName:find("fall") or animName:find("freefall") then
+                track:Stop(0)
+            end
+        end
+    end)
+end
+
+function JumpSpoofer.ForceGroundAnimation()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    pcall(function()
+        humanoid:ChangeState(Enum.HumanoidStateType.Running)
+    end)
+end
+
+function JumpSpoofer.CreateFakeGround()
+    pcall(function()
+        if State.JumpSpoofer.FakeGroundPart then
+            State.JumpSpoofer.FakeGroundPart:Destroy()
+        end
+        local part = Instance.new("Part")
+        part.Name = "CH_Anchor_" .. math.random(100000, 999999)
+        part.Anchored = true
+        part.CanCollide = false
+        part.Transparency = 1
+        part.Size = Vector3.new(4, 0.1, 4)
+        part.CFrame = CFrame.new(0, -1000, 0)
+        part.Parent = workspace.Terrain
+        State.JumpSpoofer.FakeGroundPart = part
+    end)
+end
+
+function JumpSpoofer.CreateBodyMovers()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    pcall(function()
+        if State.JumpSpoofer.VelocitySmoother then
+            State.JumpSpoofer.VelocitySmoother:Destroy()
+        end
+        if State.JumpSpoofer.GyroStabilizer then
+            State.JumpSpoofer.GyroStabilizer:Destroy()
+        end
+        local bv = Instance.new("BodyVelocity")
+        bv.Name = "CH_BV_" .. math.random(100000, 999999)
+        bv.MaxForce = Vector3.new(0, 0, 0)
+        bv.Velocity = Vector3.new(0, 0, 0)
+        bv.P = 10000
+        bv.Parent = hrp
+        State.JumpSpoofer.VelocitySmoother = bv
+        local bg = Instance.new("BodyGyro")
+        bg.Name = "CH_BG_" .. math.random(100000, 999999)
+        bg.MaxTorque = Vector3.new(0, 0, 0)
+        bg.P = 10000
+        bg.D = 500
+        bg.Parent = hrp
+        State.JumpSpoofer.GyroStabilizer = bg
+    end)
+end
+
+function JumpSpoofer.DestroyBodyMovers()
+    pcall(function()
+        if State.JumpSpoofer.VelocitySmoother then
+            State.JumpSpoofer.VelocitySmoother:Destroy()
+            State.JumpSpoofer.VelocitySmoother = nil
+        end
+        if State.JumpSpoofer.GyroStabilizer then
+            State.JumpSpoofer.GyroStabilizer:Destroy()
+            State.JumpSpoofer.GyroStabilizer = nil
+        end
+    end)
+end
+
+function JumpSpoofer.DetectMatch()
+    local inMatch = false
+    pcall(function()
+        local gui = LocalPlayer:FindFirstChild("PlayerGui")
+        if gui then
+            for _, child in ipairs(gui:GetDescendants()) do
+                if child:IsA("TextLabel") or child:IsA("TextButton") then
+                    local text = child.Text:lower()
+                    if text:find("bomb") or text:find("duel") or text:find("match")
+                       or text:find("round") or text:find("timer") or text:find("fight") then
+                        inMatch = true
+                        break
+                    end
+                end
+            end
+        end
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj.Name:lower():find("arena") or obj.Name:lower():find("match")
+               or obj.Name:lower():find("bomb") or obj.Name:lower():find("duel") then
+                inMatch = true
+                break
+            end
+        end
+        local char = LocalPlayer.Character
+        if char then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if obj:IsA("BasePart") and obj.Name:lower():find("bomb") then
+                        if (obj.Position - hrp.Position).Magnitude < 100 then
+                            inMatch = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        if LocalPlayer.Team then inMatch = true end
+    end)
+    State.JumpSpoofer.IsInMatch = inMatch
+    return inMatch
+end
+
+function JumpSpoofer.VelocityJump()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid then return end
+    local spoofer = State.JumpSpoofer
+    local now = tick()
+    if now - spoofer.LastJumpTime < spoofer.CooldownTime then return end
+    spoofer.LastJumpTime = now
+    pcall(function()
+        local groundPos = JumpSpoofer.GetGroundPosition()
+        if groundPos then
+            spoofer.LastGroundPosition = groundPos
+            spoofer.LastGroundCFrame = hrp.CFrame
+        end
+        if not spoofer.VelocitySmoother or not spoofer.VelocitySmoother.Parent then
+            JumpSpoofer.CreateBodyMovers()
+        end
+        local bv = spoofer.VelocitySmoother
+        if not bv then return end
+        JumpSpoofer.SpoofHumanoidState()
+        local jumpForce = spoofer.SpoofStrength
+        bv.MaxForce = Vector3.new(0, math.huge, 0)
+        bv.Velocity = Vector3.new(0, jumpForce, 0)
+        if spoofer.GyroStabilizer then
+            spoofer.GyroStabilizer.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+            spoofer.GyroStabilizer.CFrame = hrp.CFrame
+        end
+        JumpSpoofer.SuppressJumpAnimation()
+        task.spawn(function()
+            local startTime = tick()
+            local duration = 0.35
+            while tick() - startTime < duration do
+                if not spoofer.Enabled then break end
+                local elapsed = tick() - startTime
+                local alpha = elapsed / duration
+                local currentVel = jumpForce * (1 - alpha * alpha)
+                if bv and bv.Parent then
+                    bv.Velocity = Vector3.new(0, math.max(currentVel, 0), 0)
+                end
+                JumpSpoofer.SpoofHumanoidState()
+                JumpSpoofer.SuppressJumpAnimation()
+                JumpSpoofer.RecordPosition(hrp.Position)
+                RunService.Heartbeat:Wait()
+            end
+            if bv and bv.Parent then
+                local descentTime = tick()
+                local descentDuration = 0.4
+                while tick() - descentTime < descentDuration do
+                    if not spoofer.Enabled then break end
+                    local elapsed = tick() - descentTime
+                    local alpha = elapsed / descentDuration
+                    local descendVel = -jumpForce * 0.8 * alpha
+                    if bv and bv.Parent then
+                        bv.Velocity = Vector3.new(0, descendVel, 0)
+                    end
+                    JumpSpoofer.SpoofHumanoidState()
+                    JumpSpoofer.SuppressJumpAnimation()
+                    if JumpSpoofer.IsGrounded() then break end
+                    RunService.Heartbeat:Wait()
+                end
+            end
+            if bv and bv.Parent then
+                bv.MaxForce = Vector3.new(0, 0, 0)
+                bv.Velocity = Vector3.new(0, 0, 0)
+            end
+            if spoofer.GyroStabilizer and spoofer.GyroStabilizer.Parent then
+                spoofer.GyroStabilizer.MaxTorque = Vector3.new(0, 0, 0)
+            end
+            JumpSpoofer.ForceGroundAnimation()
+            spoofer.SpoofedJumps = spoofer.SpoofedJumps + 1
+        end)
+    end)
+end
+
+function JumpSpoofer.CFrameJump()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid then return end
+    local spoofer = State.JumpSpoofer
+    local now = tick()
+    if now - spoofer.LastJumpTime < spoofer.CooldownTime then return end
+    spoofer.LastJumpTime = now
+    pcall(function()
+        local startPos = hrp.Position
+        local jumpHeight = spoofer.SpoofStrength * 0.15
+        JumpSpoofer.SpoofHumanoidState()
+        task.spawn(function()
+            local jumpDuration = 0.6
+            local startTime = tick()
+            while tick() - startTime < jumpDuration do
+                if not spoofer.Enabled then break end
+                local elapsed = tick() - startTime
+                local alpha = elapsed / jumpDuration
+                local heightOffset = -4 * jumpHeight * (alpha - 0.5) ^ 2 + jumpHeight
+                local moveDir = humanoid.MoveDirection
+                local lateralOffset = moveDir * elapsed * humanoid.WalkSpeed
+                hrp.CFrame = CFrame.new(
+                    startPos.X + lateralOffset.X,
+                    startPos.Y + heightOffset,
+                    startPos.Z + lateralOffset.Z
+                ) * CFrame.Angles(0, math.atan2(-moveDir.X, -moveDir.Z), 0)
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, 0, hrp.Velocity.Z)
+                JumpSpoofer.SpoofHumanoidState()
+                JumpSpoofer.SuppressJumpAnimation()
+                JumpSpoofer.RecordPosition(hrp.Position)
+                RunService.RenderStepped:Wait()
+            end
+            local groundPos = JumpSpoofer.GetGroundPosition()
+            if groundPos then
+                hrp.CFrame = CFrame.new(hrp.Position.X, groundPos.Y + 3, hrp.Position.Z)
+                    * (hrp.CFrame - hrp.CFrame.Position)
+            end
+            JumpSpoofer.ForceGroundAnimation()
+            spoofer.SpoofedJumps = spoofer.SpoofedJumps + 1
+        end)
+    end)
+end
+
+function JumpSpoofer.HybridJump()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid then return end
+    local spoofer = State.JumpSpoofer
+    local now = tick()
+    if now - spoofer.LastJumpTime < spoofer.CooldownTime then return end
+    spoofer.LastJumpTime = now
+    pcall(function()
+        JumpSpoofer.SpoofHumanoidState()
+        if not spoofer.VelocitySmoother or not spoofer.VelocitySmoother.Parent then
+            JumpSpoofer.CreateBodyMovers()
+        end
+        task.spawn(function()
+            local bv = spoofer.VelocitySmoother
+            if not bv then return end
+            local jumpForce = spoofer.SpoofStrength
+            local startPos = hrp.Position
+            bv.MaxForce = Vector3.new(0, math.huge, 0)
+            bv.Velocity = Vector3.new(0, jumpForce * 0.7, 0)
+            if spoofer.GyroStabilizer then
+                spoofer.GyroStabilizer.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+                spoofer.GyroStabilizer.CFrame = hrp.CFrame
+            end
+            JumpSpoofer.SuppressJumpAnimation()
+            local ascentDuration = 0.25
+            local startTime = tick()
+            while tick() - startTime < ascentDuration do
+                if not spoofer.Enabled then break end
+                local alpha = (tick() - startTime) / ascentDuration
+                bv.Velocity = Vector3.new(0, jumpForce * 0.7 * (1 - alpha), 0)
+                JumpSpoofer.SpoofHumanoidState()
+                JumpSpoofer.SuppressJumpAnimation()
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, 0, hrp.Velocity.Z)
+                RunService.Heartbeat:Wait()
+            end
+            bv.MaxForce = Vector3.new(0, 0, 0)
+            bv.Velocity = Vector3.new(0, 0, 0)
+            local peakPos = hrp.Position
+            local descentDuration = 0.3
+            startTime = tick()
+            while tick() - startTime < descentDuration do
+                if not spoofer.Enabled then break end
+                local alpha = (tick() - startTime) / descentDuration
+                local targetY = peakPos.Y - (peakPos.Y - startPos.Y) * alpha
+                hrp.CFrame = CFrame.new(hrp.Position.X, targetY, hrp.Position.Z)
+                    * (hrp.CFrame - hrp.CFrame.Position)
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, 0, hrp.Velocity.Z)
+                JumpSpoofer.SpoofHumanoidState()
+                JumpSpoofer.SuppressJumpAnimation()
+                if JumpSpoofer.IsGrounded() then break end
+                RunService.Heartbeat:Wait()
+            end
+            if spoofer.GyroStabilizer and spoofer.GyroStabilizer.Parent then
+                spoofer.GyroStabilizer.MaxTorque = Vector3.new(0, 0, 0)
+            end
+            JumpSpoofer.ForceGroundAnimation()
+            spoofer.SpoofedJumps = spoofer.SpoofedJumps + 1
+        end)
+    end)
+end
+
+function JumpSpoofer.ExecuteJump()
+    local spoofer = State.JumpSpoofer
+    if not spoofer.Enabled then return end
+    local method = spoofer.Method
+    if method == "Velocity" then
+        JumpSpoofer.VelocityJump()
+    elseif method == "CFrame" then
+        JumpSpoofer.CFrameJump()
+    elseif method == "Hybrid" then
+        JumpSpoofer.HybridJump()
+    end
+    spoofer.JumpCount = spoofer.JumpCount + 1
+end
+
+function JumpSpoofer.StartAntiDetectLoop()
+    local spoofer = State.JumpSpoofer
+    JumpSpoofer.StopAntiDetectLoop()
+
+    spoofer.HeartbeatConnection = RunService.Heartbeat:Connect(function(dt)
+        if not spoofer.Enabled then return end
+        pcall(function()
+            local char = LocalPlayer.Character
+            if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not humanoid then return end
+            if not JumpSpoofer.IsGrounded() then
+                spoofer.AirTimeAccumulator = spoofer.AirTimeAccumulator + dt
+                if spoofer.AirTimeAccumulator > spoofer.MaxSafeAirTime then
+                    JumpSpoofer.SpoofHumanoidState()
+                    JumpSpoofer.SuppressJumpAnimation()
+                    if spoofer.AntiDetectLevel >= 2 then
+                        hrp.Velocity = Vector3.new(
+                            hrp.Velocity.X,
+                            math.clamp(hrp.Velocity.Y, -10, 10),
+                            hrp.Velocity.Z
+                        )
+                    end
+                end
+            else
+                spoofer.AirTimeAccumulator = 0
+                spoofer.LastGroundPosition = hrp.Position
+                spoofer.LastGroundCFrame = hrp.CFrame
+            end
+            if math.random(1, 60) == 1 then
+                JumpSpoofer.DetectMatch()
+            end
+        end)
+    end)
+
+    spoofer.SteppedConnection = RunService.Stepped:Connect(function()
+        if not spoofer.Enabled then return end
+        pcall(function()
+            local char = LocalPlayer.Character
+            if not char then return end
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if not humanoid then return end
+            if spoofer.AntiDetectLevel >= 2 then
+                local currentState = humanoid:GetState()
+                if currentState == Enum.HumanoidStateType.Jumping
+                   or currentState == Enum.HumanoidStateType.Freefall then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                end
+            end
+        end)
+    end)
+
+    spoofer.RenderConnection = RunService.RenderStepped:Connect(function()
+        if not spoofer.Enabled then return end
+        pcall(function()
+            JumpSpoofer.SuppressJumpAnimation()
+        end)
+    end)
+end
+
+function JumpSpoofer.StopAntiDetectLoop()
+    local spoofer = State.JumpSpoofer
+    pcall(function()
+        if spoofer.HeartbeatConnection then spoofer.HeartbeatConnection:Disconnect(); spoofer.HeartbeatConnection = nil end
+        if spoofer.SteppedConnection then spoofer.SteppedConnection:Disconnect(); spoofer.SteppedConnection = nil end
+        if spoofer.RenderConnection then spoofer.RenderConnection:Disconnect(); spoofer.RenderConnection = nil end
+    end)
+end
+
+function JumpSpoofer.HookRemotes()
+    pcall(function()
+        for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+            if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then
+                local name = remote.Name:lower()
+                if name:find("jump") or name:find("detect") or name:find("cheat")
+                   or name:find("anticheat") or name:find("verify") or name:find("validate") then
+                    -- Tracked for monitoring
+                end
+            end
+        end
+    end)
+end
+
+function JumpSpoofer.Enable()
+    local spoofer = State.JumpSpoofer
+    spoofer.Enabled = true
+    pcall(function()
+        local char = LocalPlayer.Character
+        if not char then return end
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            spoofer.OriginalJumpPower = humanoid.JumpPower
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+            humanoid.JumpPower = 0
+            humanoid.JumpHeight = 0
+        end
+    end)
+    JumpSpoofer.InitRayParams()
+    JumpSpoofer.CreateFakeGround()
+    JumpSpoofer.CreateBodyMovers()
+    JumpSpoofer.StartAntiDetectLoop()
+    JumpSpoofer.HookRemotes()
+    JumpSpoofer.DetectMatch()
+    spoofer.JumpCount = 0
+    spoofer.SpoofedJumps = 0
+    spoofer.AirTimeAccumulator = 0
+end
+
+function JumpSpoofer.Disable()
+    local spoofer = State.JumpSpoofer
+    spoofer.Enabled = false
+    JumpSpoofer.StopAntiDetectLoop()
+    JumpSpoofer.DestroyBodyMovers()
+    pcall(function()
+        if spoofer.FakeGroundPart then
+            spoofer.FakeGroundPart:Destroy()
+            spoofer.FakeGroundPart = nil
+        end
+    end)
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+                humanoid.JumpPower = spoofer.OriginalJumpPower
+            end
+        end
+    end)
+    pcall(function() workspace.Gravity = spoofer.OriginalGravity end)
+    spoofer.PositionHistory = {}
+end
+
+function JumpSpoofer.OnCharacterAdded(character)
+    if not State.JumpSpoofer.Enabled then return end
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    if not humanoid then return end
+    task.delay(0.5, function()
+        if State.JumpSpoofer.Enabled then
+            pcall(function()
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+                humanoid.JumpPower = 0
+                humanoid.JumpHeight = 0
+            end)
+            JumpSpoofer.InitRayParams()
+            JumpSpoofer.CreateBodyMovers()
+        end
+    end)
+end
+
+local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(char)
+    JumpSpoofer.OnCharacterAdded(char)
+end)
+table.insert(State.Connections, charAddedConn)
+
+-- ============================================================
+-- UI CREATION
+-- ============================================================
+
+pcall(function()
+    local existing = game:GetService("CoreGui"):FindFirstChild("CatHub")
+        or LocalPlayer.PlayerGui:FindFirstChild("CatHub")
+    if existing then existing:Destroy() end
+end)
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CatHub"
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+
+pcall(function()
+    if syn and syn.protect_gui then
+        syn.protect_gui(ScreenGui)
+        ScreenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        ScreenGui.Parent = gethui()
+    else
+        ScreenGui.Parent = game:GetService("CoreGui")
+    end
+end)
+if not ScreenGui.Parent then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- ============================================================
+-- SHADOW
+-- ============================================================
+local ShadowFrame = Instance.new("ImageLabel")
+ShadowFrame.Name = "Shadow"
+ShadowFrame.BackgroundTransparency = 1
+ShadowFrame.Image = "rbxassetid://6014261993"
+ShadowFrame.ImageColor3 = Theme.Shadow
+ShadowFrame.ImageTransparency = 0.4
+ShadowFrame.ScaleType = Enum.ScaleType.Slice
+ShadowFrame.SliceCenter = Rect.new(49, 49, 450, 450)
+ShadowFrame.Size = UDim2.new(0, 580 + 60, 0, 520 + 60)
+ShadowFrame.Position = UDim2.new(0.5, -320, 0.5, -290)
+ShadowFrame.ZIndex = 0
+ShadowFrame.Parent = ScreenGui
+
+-- ============================================================
+-- MAIN WINDOW
+-- ============================================================
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.BackgroundColor3 = Theme.Background
+MainFrame.BorderSizePixel = 0
+MainFrame.Size = State.WindowSize
+MainFrame.Position = UDim2.new(0.5, -290, 0.5, -260)
+MainFrame.ClipsDescendants = true
+MainFrame.ZIndex = 1
+MainFrame.Parent = ScreenGui
+AddCorner(MainFrame, Theme.CornerRadius)
+AddStroke(MainFrame, Theme.Accent, 1, 0.7)
+
+local BgGradient = Instance.new("Frame")
+BgGradient.BackgroundColor3 = Theme.Accent
+BgGradient.BackgroundTransparency = 0.95
+BgGradient.Size = UDim2.new(1, 0, 1, 0)
+BgGradient.BorderSizePixel = 0
+BgGradient.ZIndex = 1
+BgGradient.Parent = MainFrame
+AddCorner(BgGradient, Theme.CornerRadius)
+AddGradient(BgGradient, Color3.fromRGB(255, 255, 255), Color3.fromRGB(0, 0, 0), 160)
+
+-- ============================================================
+-- TITLE BAR
+-- ============================================================
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.BackgroundColor3 = Theme.TitleBar
+TitleBar.BorderSizePixel = 0
+TitleBar.Size = UDim2.new(1, 0, 0, 44)
+TitleBar.Position = UDim2.new(0, 0, 0, 0)
+TitleBar.ZIndex = 5
+TitleBar.Parent = MainFrame
+AddCorner(TitleBar, Theme.CornerRadius)
+
+local TitleBarCover = Instance.new("Frame")
+TitleBarCover.BackgroundColor3 = Theme.TitleBar
+TitleBarCover.BorderSizePixel = 0
+TitleBarCover.Size = UDim2.new(1, 0, 0, 12)
+TitleBarCover.Position = UDim2.new(0, 0, 1, -12)
+TitleBarCover.ZIndex = 5
+TitleBarCover.Parent = TitleBar
+
+-- Accent line with gradient
+local AccentLine = Instance.new("Frame")
+AccentLine.BackgroundColor3 = Theme.Accent
+AccentLine.BorderSizePixel = 0
+AccentLine.Size = UDim2.new(1, 0, 0, 2)
+AccentLine.Position = UDim2.new(0, 0, 1, -2)
+AccentLine.ZIndex = 6
+AccentLine.Parent = TitleBar
+AddGradient(AccentLine, Theme.AccentGlow, Theme.CatPink, 0)
+
+-- Cat icon
+local TitleIcon = Instance.new("TextLabel")
+TitleIcon.BackgroundTransparency = 1
+TitleIcon.Size = UDim2.new(0, 30, 1, 0)
+TitleIcon.Position = UDim2.new(0, 10, 0, 0)
+TitleIcon.Font = Theme.FontBold
+TitleIcon.Text = "🐱"
+TitleIcon.TextSize = 18
+TitleIcon.ZIndex = 6
+TitleIcon.Parent = TitleBar
+
+-- Title text: "CatHub V2.1"
+local TitleText = Instance.new("TextLabel")
+TitleText.Name = "TitleText"
+TitleText.BackgroundTransparency = 1
+TitleText.Size = UDim2.new(0, 100, 0, 20)
+TitleText.Position = UDim2.new(0, 38, 0, 4)
+TitleText.Font = Theme.FontBold
+TitleText.Text = HubTitleShort
+TitleText.TextColor3 = Theme.Text
+TitleText.TextSize = 15
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.ZIndex = 6
+TitleText.Parent = TitleBar
+
+-- Game name subtitle
+local GameNameLabel = Instance.new("TextLabel")
+GameNameLabel.Name = "GameName"
+GameNameLabel.BackgroundTransparency = 1
+GameNameLabel.Size = UDim2.new(1, -160, 0, 16)
+GameNameLabel.Position = UDim2.new(0, 38, 0, 24)
+GameNameLabel.Font = Theme.FontLight
+GameNameLabel.Text = DisplayGameName
+GameNameLabel.TextColor3 = Theme.Accent
+GameNameLabel.TextSize = 10
+GameNameLabel.TextXAlignment = Enum.TextXAlignment.Left
+GameNameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+GameNameLabel.ZIndex = 6
+GameNameLabel.Parent = TitleBar
+
+-- Animated game name color pulse
+task.spawn(function()
+    local hue = 0
+    while task.wait(0.05) do
+        pcall(function()
+            if not GameNameLabel or not GameNameLabel.Parent then return end
+            hue = (hue + 0.005) % 1
+            local pulseColor = Color3.fromHSV(hue, 0.6, 1)
+            GameNameLabel.TextColor3 = pulseColor
+        end)
+    end
+end)
+
+-- Close Button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+CloseBtn.BackgroundTransparency = 0.8
+CloseBtn.Size = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position = UDim2.new(1, -36, 0.5, -14)
+CloseBtn.Font = Theme.FontBold
+CloseBtn.Text = "×"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+CloseBtn.TextSize = 18
+CloseBtn.ZIndex = 7
+CloseBtn.AutoButtonColor = false
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Parent = TitleBar
+AddCorner(CloseBtn, Theme.CornerRadiusSmall)
+
+CloseBtn.MouseEnter:Connect(function()
+    SafeTween(CloseBtn, TweenInfo.new(Theme.AnimSpeedFast), {
+        BackgroundTransparency = 0.2, TextColor3 = Color3.fromRGB(255, 255, 255),
+    })
+end)
+CloseBtn.MouseLeave:Connect(function()
+    SafeTween(CloseBtn, TweenInfo.new(Theme.AnimSpeedFast), {
+        BackgroundTransparency = 0.8, TextColor3 = Color3.fromRGB(255, 100, 100),
+    })
+end)
+
+-- Minimize Button
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.BackgroundColor3 = Theme.Accent
+MinimizeBtn.BackgroundTransparency = 0.8
+MinimizeBtn.Size = UDim2.new(0, 28, 0, 28)
+MinimizeBtn.Position = UDim2.new(1, -70, 0.5, -14)
+MinimizeBtn.Font = Theme.FontBold
+MinimizeBtn.Text = "–"
+MinimizeBtn.TextColor3 = Theme.Accent
+MinimizeBtn.TextSize = 18
+MinimizeBtn.ZIndex = 7
+MinimizeBtn.AutoButtonColor = false
+MinimizeBtn.BorderSizePixel = 0
+MinimizeBtn.Parent = TitleBar
+AddCorner(MinimizeBtn, Theme.CornerRadiusSmall)
+
+MinimizeBtn.MouseEnter:Connect(function()
+    SafeTween(MinimizeBtn, TweenInfo.new(Theme.AnimSpeedFast), {
+        BackgroundTransparency = 0.3, TextColor3 = Color3.fromRGB(255, 255, 255),
+    })
+end)
+MinimizeBtn.MouseLeave:Connect(function()
+    SafeTween(MinimizeBtn, TweenInfo.new(Theme.AnimSpeedFast), {
+        BackgroundTransparency = 0.8, TextColor3 = Theme.Accent,
+    })
+end)
+
+-- ============================================================
+-- DRAGGING
+-- ============================================================
+do
+    local dragging = false
+    local dragStart, startPos
+
+    TitleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            local mp = UserInputService:GetMouseLocation()
+            local ca, cs = CloseBtn.AbsolutePosition, CloseBtn.AbsoluteSize
+            local ma, ms = MinimizeBtn.AbsolutePosition, MinimizeBtn.AbsoluteSize
+            if mp.X >= ca.X and mp.X <= ca.X + cs.X and mp.Y >= ca.Y and mp.Y <= ca.Y + cs.Y then return end
+            if mp.X >= ma.X and mp.X <= ma.X + ms.X and mp.Y >= ma.Y and mp.Y <= ma.Y + ms.Y then return end
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                         or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                                     startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            MainFrame.Position = newPos
+            ShadowFrame.Position = UDim2.new(newPos.X.Scale, newPos.X.Offset - 30,
+                                              newPos.Y.Scale, newPos.Y.Offset - 30)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+-- ============================================================
+-- CONTENT AREA
+-- ============================================================
+local ContentArea = Instance.new("Frame")
+ContentArea.Name = "ContentArea"
+ContentArea.BackgroundTransparency = 1
+ContentArea.Size = UDim2.new(1, 0, 1, -46)
+ContentArea.Position = UDim2.new(0, 0, 0, 46)
+ContentArea.ZIndex = 2
+ContentArea.ClipsDescendants = true
+ContentArea.Parent = MainFrame
+
+-- ============================================================
+-- TAB BAR
+-- ============================================================
+local TabBar = Instance.new("Frame")
+TabBar.BackgroundColor3 = Theme.BackgroundSecondary
+TabBar.BackgroundTransparency = 0.3
+TabBar.BorderSizePixel = 0
+TabBar.Size = UDim2.new(1, -20, 0, 36)
+TabBar.Position = UDim2.new(0, 10, 0, 5)
+TabBar.ZIndex = 3
+TabBar.Parent = ContentArea
+AddCorner(TabBar, Theme.CornerRadiusSmall)
+
+local TabBarLayout = Instance.new("UIListLayout")
+TabBarLayout.FillDirection = Enum.FillDirection.Horizontal
+TabBarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabBarLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+TabBarLayout.Padding = UDim.new(0, 4)
+TabBarLayout.Parent = TabBar
+AddPadding(TabBar, 4, 4, 8, 8)
+
+local TabPages = Instance.new("Frame")
+TabPages.Name = "TabPages"
+TabPages.BackgroundTransparency = 1
+TabPages.Size = UDim2.new(1, -20, 1, -50)
+TabPages.Position = UDim2.new(0, 10, 0, 46)
+TabPages.ZIndex = 2
+TabPages.ClipsDescendants = true
+TabPages.Parent = ContentArea
+
+-- ============================================================
+-- TAB SYSTEM
+-- ============================================================
+local Tabs = {}
+
+local function CreateTabButton(name, icon)
+    local btn = Instance.new("TextButton")
+    btn.Name = name .. "Tab"
+    btn.BackgroundColor3 = Theme.TabInactive
+    btn.BackgroundTransparency = 0.5
+    btn.Size = UDim2.new(0, 105, 0, 28)
+    btn.Font = Theme.Font
+    btn.Text = (icon or "") .. "  " .. name
+    btn.TextColor3 = Theme.TextDim
+    btn.TextSize = 11
+    btn.ZIndex = 4
+    btn.AutoButtonColor = false
+    btn.BorderSizePixel = 0
+    btn.Parent = TabBar
+    AddCorner(btn, Theme.CornerRadiusTiny)
+    return btn
+end
+
+local function CreateTabPage(name)
+    local page = Instance.new("ScrollingFrame")
+    page.Name = name .. "Page"
+    page.BackgroundTransparency = 1
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.ScrollBarThickness = 3
+    page.ScrollBarImageColor3 = Theme.Accent
+    page.ScrollBarImageTransparency = 0.5
+    page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.Visible = false
+    page.ZIndex = 2
+    page.BorderSizePixel = 0
+    page.Parent = TabPages
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 8)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = page
+    AddPadding(page, 4, 10, 0, 4)
+    return page
+end
+
+local function SwitchTab(tabName)
+    State.CurrentTab = tabName
+    for name, data in pairs(Tabs) do
+        local isActive = (name == tabName)
+        SafeTween(data.Button, TweenInfo.new(Theme.AnimSpeedFast), {
+            BackgroundTransparency = isActive and 0.1 or 0.5,
+            BackgroundColor3 = isActive and Theme.Accent or Theme.TabInactive,
+        })
+        SafeTween(data.Button, TweenInfo.new(Theme.AnimSpeedFast), {
+            TextColor3 = isActive and Color3.fromRGB(255, 255, 255) or Theme.TextDim,
+        })
+        data.Page.Visible = isActive
+    end
+end
+
+-- ============================================================
+-- UI COMPONENT FACTORIES
+-- ============================================================
+
+local function CreateSection(parent, title, layoutOrder)
+    local section = Instance.new("Frame")
+    section.Name = title .. "Section"
+    section.BackgroundTransparency = 1
+    section.Size = UDim2.new(1, 0, 0, 24)
+    section.ZIndex = 3
+    section.LayoutOrder = layoutOrder or 0
+    section.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Font = Theme.FontBold
+    label.Text = string.upper(title)
+    label.TextColor3 = Theme.TextMuted
+    label.TextSize = 10
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 3
+    label.Parent = section
+
+    local line = Instance.new("Frame")
+    line.BackgroundColor3 = Theme.Accent
+    line.BackgroundTransparency = 0.8
+    line.BorderSizePixel = 0
+    line.Size = UDim2.new(1, -80, 0, 1)
+    line.Position = UDim2.new(0, 80, 0.5, 0)
+    line.ZIndex = 3
+    line.Parent = section
+    return section
+end
+
+local function CreateToggle(parent, name, description, default, callback, layoutOrder)
+    local container = Instance.new("Frame")
+    container.Name = name .. "Toggle"
+    container.BackgroundColor3 = Theme.ButtonBg
+    container.BorderSizePixel = 0
+    container.Size = UDim2.new(1, 0, 0, 50)
+    container.ZIndex = 3
+    container.LayoutOrder = layoutOrder or 0
+    container.Parent = parent
+    container:SetAttribute("OrigTransparency", 0)
+    AddCorner(container, Theme.CornerRadiusSmall)
+    AddStroke(container, Theme.Accent, 1, 0.9)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size = UDim2.new(1, -80, 0, 20)
+    nameLabel.Position = UDim2.new(0, 14, 0, 6)
+    nameLabel.Font = Theme.Font
+    nameLabel.Text = name
+    nameLabel.TextColor3 = Theme.Text
+    nameLabel.TextSize = 13
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.ZIndex = 4
+    nameLabel.Parent = container
+
+    local descLabel = Instance.new("TextLabel")
+    descLabel.BackgroundTransparency = 1
+    descLabel.Size = UDim2.new(1, -80, 0, 16)
+    descLabel.Position = UDim2.new(0, 14, 0, 26)
+    descLabel.Font = Theme.FontLight
+    descLabel.Text = description or ""
+    descLabel.TextColor3 = Theme.TextMuted
+    descLabel.TextSize = 10
+    descLabel.TextXAlignment = Enum.TextXAlignment.Left
+    descLabel.ZIndex = 4
+    descLabel.Parent = container
+
+    local toggleBg = Instance.new("Frame")
+    toggleBg.BackgroundColor3 = default and Theme.ToggleOn or Theme.ToggleOff
+    toggleBg.BorderSizePixel = 0
+    toggleBg.Size = UDim2.new(0, 44, 0, 24)
+    toggleBg.Position = UDim2.new(1, -58, 0.5, -12)
+    toggleBg.ZIndex = 5
+    toggleBg.Parent = container
+    AddCorner(toggleBg, UDim.new(1, 0))
+
+    local knob = Instance.new("Frame")
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    knob.BorderSizePixel = 0
+    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Position = default and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+    knob.ZIndex = 6
+    knob.Parent = toggleBg
+    AddCorner(knob, UDim.new(1, 0))
+
+    local toggled = default or false
+
+    local clickArea = Instance.new("TextButton")
+    clickArea.BackgroundTransparency = 1
+    clickArea.Size = UDim2.new(1, 0, 1, 0)
+    clickArea.Text = ""
+    clickArea.ZIndex = 7
+    clickArea.Parent = container
+
+    clickArea.MouseButton1Click:Connect(function()
+        toggled = not toggled
+        SafeTween(toggleBg, TweenInfo.new(Theme.AnimSpeedFast, Enum.EasingStyle.Back), {
+            BackgroundColor3 = toggled and Theme.ToggleOn or Theme.ToggleOff,
+        })
+        SafeTween(knob, TweenInfo.new(Theme.AnimSpeedFast, Enum.EasingStyle.Back), {
+            Position = toggled and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+        })
+        local stroke = container:FindFirstChildOfClass("UIStroke")
+        if stroke then
+            SafeTween(stroke, TweenInfo.new(Theme.AnimSpeedFast), {
+                Transparency = toggled and 0.5 or 0.9,
+            })
+        end
+        pcall(callback, toggled)
+    end)
+
+    clickArea.MouseEnter:Connect(function()
+        SafeTween(container, TweenInfo.new(Theme.AnimSpeedFast), {BackgroundColor3 = Theme.ButtonHover})
+    end)
+    clickArea.MouseLeave:Connect(function()
+        SafeTween(container, TweenInfo.new(Theme.AnimSpeedFast), {BackgroundColor3 = Theme.ButtonBg})
+    end)
+
+    return container
+end
+
+local function CreateSlider(parent, name, min, max, default, suffix, callback, layoutOrder)
+    local container = Instance.new("Frame")
+    container.Name = name .. "Slider"
+    container.BackgroundColor3 = Theme.ButtonBg
+    container.BorderSizePixel = 0
+    container.Size = UDim2.new(1, 0, 0, 60)
+    container.ZIndex = 3
+    container.LayoutOrder = layoutOrder or 0
+    container.Parent = parent
+    container:SetAttribute("OrigTransparency", 0)
+    AddCorner(container, Theme.CornerRadiusSmall)
+    AddStroke(container, Theme.Accent, 1, 0.9)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size = UDim2.new(0.5, -10, 0, 20)
+    nameLabel.Position = UDim2.new(0, 14, 0, 6)
+    nameLabel.Font = Theme.Font
+    nameLabel.Text = name
+    nameLabel.TextColor3 = Theme.Text
+    nameLabel.TextSize = 13
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.ZIndex = 4
+    nameLabel.Parent = container
+
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Name = "ValueLabel"
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Size = UDim2.new(0.5, -14, 0, 20)
+    valueLabel.Position = UDim2.new(0.5, 0, 0, 6)
+    valueLabel.Font = Theme.FontBold
+    valueLabel.Text = tostring(math.floor(default)) .. (suffix or "")
+    valueLabel.TextColor3 = Theme.Accent
+    valueLabel.TextSize = 13
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valueLabel.ZIndex = 4
+    valueLabel.Parent = container
+
+    local track = Instance.new("Frame")
+    track.BackgroundColor3 = Theme.SliderBg
+    track.BorderSizePixel = 0
+    track.Size = UDim2.new(1, -28, 0, 8)
+    track.Position = UDim2.new(0, 14, 0, 36)
+    track.ZIndex = 4
+    track.Parent = container
+    AddCorner(track, UDim.new(1, 0))
+
+    local fillPercent = (default - min) / (max - min)
+    local fill = Instance.new("Frame")
+    fill.BackgroundColor3 = Theme.SliderFill
+    fill.BorderSizePixel = 0
+    fill.Size = UDim2.new(fillPercent, 0, 1, 0)
+    fill.ZIndex = 5
+    fill.Parent = track
+    AddCorner(fill, UDim.new(1, 0))
+
+    local thumb = Instance.new("Frame")
+    thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    thumb.BorderSizePixel = 0
+    thumb.Size = UDim2.new(0, 16, 0, 16)
+    thumb.Position = UDim2.new(fillPercent, -8, 0.5, -8)
+    thumb.ZIndex = 7
+    thumb.Parent = track
+    AddCorner(thumb, UDim.new(1, 0))
+
+    local thumbGlow = Instance.new("Frame")
+    thumbGlow.BackgroundColor3 = Theme.Accent
+    thumbGlow.BackgroundTransparency = 0.5
+    thumbGlow.BorderSizePixel = 0
+    thumbGlow.Size = UDim2.new(0, 24, 0, 24)
+    thumbGlow.Position = UDim2.new(0.5, -12, 0.5, -12)
+    thumbGlow.ZIndex = 6
+    thumbGlow.Visible = false
+    thumbGlow.Parent = thumb
+    AddCorner(thumbGlow, UDim.new(1, 0))
+
+    local sliding = false
+    local currentValue = default
+
+    local function UpdateSlider(inputPos)
+        local rel = math.clamp((inputPos.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+        currentValue = math.floor(min + (max - min) * rel)
+        rel = (currentValue - min) / (max - min)
+        fill.Size = UDim2.new(rel, 0, 1, 0)
+        thumb.Position = UDim2.new(rel, -8, 0.5, -8)
+        valueLabel.Text = tostring(currentValue) .. (suffix or "")
+        pcall(callback, currentValue)
+    end
+
+    local trackBtn = Instance.new("TextButton")
+    trackBtn.BackgroundTransparency = 1
+    trackBtn.Size = UDim2.new(1, 0, 1, 12)
+    trackBtn.Position = UDim2.new(0, 0, 0, -6)
+    trackBtn.Text = ""
+    trackBtn.ZIndex = 8
+    trackBtn.Parent = track
+
+    trackBtn.MouseButton1Down:Connect(function()
+        sliding = true
+        thumbGlow.Visible = true
+        UpdateSlider(UserInputService:GetMouseLocation())
+    end)
+
+    local moveConn = UserInputService.InputChanged:Connect(function(input)
+        if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement
+                        or input.UserInputType == Enum.UserInputType.Touch) then
+            UpdateSlider(input.Position)
+        end
+    end)
+    table.insert(State.Connections, moveConn)
+
+    local upConn = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+            thumbGlow.Visible = false
+        end
+    end)
+    table.insert(State.Connections, upConn)
+
+    trackBtn.MouseEnter:Connect(function()
+        SafeTween(container, TweenInfo.new(Theme.AnimSpeedFast), {BackgroundColor3 = Theme.ButtonHover})
+    end)
+    trackBtn.MouseLeave:Connect(function()
+        if not sliding then
+            SafeTween(container, TweenInfo.new(Theme.AnimSpeedFast), {BackgroundColor3 = Theme.ButtonBg})
+        end
+    end)
+
+    return container
+end
+
+local function CreateColorPicker(parent, name, default, callback, layoutOrder)
+    local container = Instance.new("Frame")
+    container.Name = name .. "ColorPicker"
+    container.BackgroundColor3 = Theme.ButtonBg
+    container.BorderSizePixel = 0
+    container.Size = UDim2.new(1, 0, 0, 100)
+    container.ZIndex = 3
+    container.LayoutOrder = layoutOrder or 0
+    container.Parent = parent
+    container:SetAttribute("OrigTransparency", 0)
+    AddCorner(container, Theme.CornerRadiusSmall)
+    AddStroke(container, Theme.Accent, 1, 0.9)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size = UDim2.new(0.5, 0, 0, 20)
+    nameLabel.Position = UDim2.new(0, 14, 0, 6)
+    nameLabel.Font = Theme.Font
+    nameLabel.Text = name
+    nameLabel.TextColor3 = Theme.Text
+    nameLabel.TextSize = 13
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.ZIndex = 4
+    nameLabel.Parent = container
+
+    local preview = Instance.new("Frame")
+    preview.BackgroundColor3 = default
+    preview.BorderSizePixel = 0
+    preview.Size = UDim2.new(0, 28, 0, 16)
+    preview.Position = UDim2.new(1, -44, 0, 6)
+    preview.ZIndex = 5
+    preview.Parent = container
+    AddCorner(preview, Theme.CornerRadiusTiny)
+    AddStroke(preview, Color3.fromRGB(255, 255, 255), 1, 0.7)
+
+    local hueStrip = Instance.new("Frame")
+    hueStrip.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    hueStrip.BorderSizePixel = 0
+    hueStrip.Size = UDim2.new(1, -28, 0, 18)
+    hueStrip.Position = UDim2.new(0, 14, 0, 32)
+    hueStrip.ZIndex = 5
+    hueStrip.Parent = container
+    AddCorner(hueStrip, Theme.CornerRadiusTiny)
+
+    local hueGrad = Instance.new("UIGradient")
+    hueGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+        ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255, 255, 0)),
+        ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0, 255, 0)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+        ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0, 0, 255)),
+        ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255, 0, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
+    })
+    hueGrad.Parent = hueStrip
+
+    local hueSel = Instance.new("Frame")
+    hueSel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    hueSel.BorderSizePixel = 0
+    hueSel.Size = UDim2.new(0, 4, 1, 4)
+    hueSel.ZIndex = 7
+    hueSel.Parent = hueStrip
+    AddCorner(hueSel, UDim.new(1, 0))
+
+    local satStrip = Instance.new("Frame")
+    satStrip.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    satStrip.BorderSizePixel = 0
+    satStrip.Size = UDim2.new(1, -68, 0, 12)
+    satStrip.Position = UDim2.new(0, 50, 0, 57)
+    satStrip.ZIndex = 5
+    satStrip.Parent = container
+    AddCorner(satStrip, UDim.new(1, 0))
+
+    local satGrad = Instance.new("UIGradient")
+    satGrad.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), default)
+    satGrad.Parent = satStrip
+
+    local satSel = Instance.new("Frame")
+    satSel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    satSel.BorderSizePixel = 0
+    satSel.Size = UDim2.new(0, 4, 1, 4)
+    satSel.ZIndex = 7
+    satSel.Parent = satStrip
+    AddCorner(satSel, UDim.new(1, 0))
+
+    local briStrip = Instance.new("Frame")
+    briStrip.BackgroundColor3 = default
+    briStrip.BorderSizePixel = 0
+    briStrip.Size = UDim2.new(1, -68, 0, 12)
+    briStrip.Position = UDim2.new(0, 50, 0, 77)
+    briStrip.ZIndex = 5
+    briStrip.Parent = container
+    AddCorner(briStrip, UDim.new(1, 0))
+
+    local briGrad = Instance.new("UIGradient")
+    briGrad.Color = ColorSequence.new(Color3.fromRGB(0, 0, 0), default)
+    briGrad.Parent = briStrip
+
+    local briSel = Instance.new("Frame")
+    briSel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    briSel.BorderSizePixel = 0
+    briSel.Size = UDim2.new(0, 4, 1, 4)
+    briSel.ZIndex = 7
+    briSel.Parent = briStrip
+    AddCorner(briSel, UDim.new(1, 0))
+
+    -- Labels
+    for _, d in ipairs({
+        {text = "SAT", y = 56},
+        {text = "BRI", y = 76},
+    }) do
+        local lb = Instance.new("TextLabel")
+        lb.BackgroundTransparency = 1
+        lb.Size = UDim2.new(0, 30, 0, 14)
+        lb.Position = UDim2.new(0, 14, 0, d.y)
+        lb.Font = Theme.FontLight
+        lb.Text = d.text
+        lb.TextColor3 = Theme.TextMuted
+        lb.TextSize = 9
+        lb.TextXAlignment = Enum.TextXAlignment.Left
+        lb.ZIndex = 4
+        lb.Parent = container
+    end
+
+    local h, s, v = Color3.toHSV(default)
+    local dHue, dSat, dBri = false, false, false
+
+    local function UpdateColor()
+        local color = Color3.fromHSV(h, s, v)
+        preview.BackgroundColor3 = color
+        local hc = Color3.fromHSV(h, 1, 1)
+        satGrad.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), hc)
+        briGrad.Color = ColorSequence.new(Color3.fromRGB(0, 0, 0), Color3.fromHSV(h, s, 1))
+        pcall(callback, color)
+    end
+
+    for _, d in ipairs({
+        {strip = hueStrip, flag = "hue"},
+        {strip = satStrip, flag = "sat"},
+        {strip = briStrip, flag = "bri"},
+    }) do
+        local b = Instance.new("TextButton")
+        b.BackgroundTransparency = 1
+        b.Size = UDim2.new(1, 0, 1, 8)
+        b.Position = UDim2.new(0, 0, 0, -4)
+        b.Text = ""
+        b.ZIndex = 8
+        b.Parent = d.strip
+        b.MouseButton1Down:Connect(function()
+            if d.flag == "hue" then dHue = true
+            elseif d.flag == "sat" then dSat = true
+            else dBri = true end
+        end)
+    end
+
+    local cpMove = UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+           or input.UserInputType == Enum.UserInputType.Touch then
+            if dHue then
+                h = math.clamp((input.Position.X - hueStrip.AbsolutePosition.X) / hueStrip.AbsoluteSize.X, 0, 1)
+                hueSel.Position = UDim2.new(h, -2, 0, -2)
+                UpdateColor()
+            end
+            if dSat then
+                s = math.clamp((input.Position.X - satStrip.AbsolutePosition.X) / satStrip.AbsoluteSize.X, 0, 1)
+                satSel.Position = UDim2.new(s, -2, 0, -2)
+                UpdateColor()
+            end
+            if dBri then
+                v = math.clamp((input.Position.X - briStrip.AbsolutePosition.X) / briStrip.AbsoluteSize.X, 0, 1)
+                briSel.Position = UDim2.new(v, -2, 0, -2)
+                UpdateColor()
+            end
+        end
+    end)
+    table.insert(State.Connections, cpMove)
+
+    local cpUp = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dHue = false; dSat = false; dBri = false
+        end
+    end)
+    table.insert(State.Connections, cpUp)
+
+    hueSel.Position = UDim2.new(h, -2, 0, -2)
+    satSel.Position = UDim2.new(s, -2, 0, -2)
+    briSel.Position = UDim2.new(v, -2, 0, -2)
+
+    return container
+end
+
+local function CreateButton(parent, text, description, callback, layoutOrder)
+    local container = Instance.new("Frame")
+    container.Name = text .. "Button"
+    container.BackgroundColor3 = Theme.ButtonBg
+    container.BorderSizePixel = 0
+    container.Size = UDim2.new(1, 0, 0, 46)
+    container.ZIndex = 3
+    container.LayoutOrder = layoutOrder or 0
+    container.ClipsDescendants = true
+    container.Parent = parent
+    container:SetAttribute("OrigTransparency", 0)
+    AddCorner(container, Theme.CornerRadiusSmall)
+    AddStroke(container, Theme.Accent, 1, 0.9)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size = UDim2.new(1, -100, 0, 18)
+    nameLabel.Position = UDim2.new(0, 14, 0, 5)
+    nameLabel.Font = Theme.Font
+    nameLabel.Text = text
+    nameLabel.TextColor3 = Theme.Text
+    nameLabel.TextSize = 13
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.ZIndex = 4
+    nameLabel.Parent = container
+
+    if description then
+        local dsc = Instance.new("TextLabel")
+        dsc.BackgroundTransparency = 1
+        dsc.Size = UDim2.new(1, -100, 0, 14)
+        dsc.Position = UDim2.new(0, 14, 0, 24)
+        dsc.Font = Theme.FontLight
+        dsc.Text = description
+        dsc.TextColor3 = Theme.TextMuted
+        dsc.TextSize = 10
+        dsc.TextXAlignment = Enum.TextXAlignment.Left
+        dsc.ZIndex = 4
+        dsc.Parent = container
+    end
+
+    local actionBtn = Instance.new("TextButton")
+    actionBtn.BackgroundColor3 = Theme.Accent
+    actionBtn.BackgroundTransparency = 0.3
+    actionBtn.Size = UDim2.new(0, 70, 0, 28)
+    actionBtn.Position = UDim2.new(1, -82, 0.5, -14)
+    actionBtn.Font = Theme.FontBold
+    actionBtn.Text = "RUN"
+    actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    actionBtn.TextSize = 11
+    actionBtn.ZIndex = 5
+    actionBtn.AutoButtonColor = false
+    actionBtn.BorderSizePixel = 0
+    actionBtn.Parent = container
+    AddCorner(actionBtn, Theme.CornerRadiusTiny)
+
+    actionBtn.MouseButton1Click:Connect(function()
+        CreateRipple(actionBtn, UserInputService:GetMouseLocation())
+        SafeTween(actionBtn, TweenInfo.new(0.1), {BackgroundTransparency = 0})
+        task.delay(0.15, function()
+            SafeTween(actionBtn, TweenInfo.new(0.2), {BackgroundTransparency = 0.3})
+        end)
+        pcall(callback)
+    end)
+
+    actionBtn.MouseEnter:Connect(function()
+        SafeTween(actionBtn, TweenInfo.new(Theme.AnimSpeedFast), {BackgroundTransparency = 0.1})
+    end)
+    actionBtn.MouseLeave:Connect(function()
+        SafeTween(actionBtn, TweenInfo.new(Theme.AnimSpeedFast), {BackgroundTransparency = 0.3})
+    end)
+
+    return container, actionBtn
+end
+
+local function CreateTextInput(parent, placeholder, isMultiline, layoutOrder)
+    local container = Instance.new("Frame")
+    container.Name = "TextInputContainer"
+    container.BackgroundColor3 = Theme.InputBg
+    container.BorderSizePixel = 0
+    container.Size = UDim2.new(1, 0, 0, isMultiline and 90 or 38)
+    container.ZIndex = 3
+    container.LayoutOrder = layoutOrder or 0
+    container.Parent = parent
+    container:SetAttribute("OrigTransparency", 0)
+    AddCorner(container, Theme.CornerRadiusSmall)
+    AddStroke(container, Theme.InputBorder, 1, 0.5)
+
+    local textBox = Instance.new("TextBox")
+    textBox.BackgroundTransparency = 1
+    textBox.Size = UDim2.new(1, -20, 1, -10)
+    textBox.Position = UDim2.new(0, 10, 0, 5)
+    textBox.Font = Theme.FontLight
+    textBox.PlaceholderText = placeholder or "Type here..."
+    textBox.PlaceholderColor3 = Theme.TextMuted
+    textBox.Text = ""
+    textBox.TextColor3 = Theme.Text
+    textBox.TextSize = 12
+    textBox.TextXAlignment = Enum.TextXAlignment.Left
+    textBox.TextYAlignment = isMultiline and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center
+    textBox.ClearTextOnFocus = false
+    textBox.MultiLine = isMultiline or false
+    textBox.TextWrapped = isMultiline or false
+    textBox.ZIndex = 4
+    textBox.Parent = container
+
+    textBox.Focused:Connect(function()
+        local st = container:FindFirstChildOfClass("UIStroke")
+        if st then SafeTween(st, TweenInfo.new(Theme.AnimSpeedFast), {Color = Theme.Accent, Transparency = 0.2}) end
+    end)
+    textBox.FocusLost:Connect(function()
+        local st = container:FindFirstChildOfClass("UIStroke")
+        if st then SafeTween(st, TweenInfo.new(Theme.AnimSpeedFast), {Color = Theme.InputBorder, Transparency = 0.5}) end
+    end)
+
+    return container, textBox
+end
+
+local function CreateStatusLabel(parent, layoutOrder)
+    local label = Instance.new("TextLabel")
+    label.Name = "StatusLabel"
+    label.BackgroundColor3 = Theme.ButtonBg
+    label.BackgroundTransparency = 0.3
+    label.Size = UDim2.new(1, 0, 0, 30)
+    label.Font = Theme.Font
+    label.Text = "● Ready"
+    label.TextColor3 = Theme.Success
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.ZIndex = 4
+    label.LayoutOrder = layoutOrder or 0
+    label.BorderSizePixel = 0
+    label.Parent = parent
+    label:SetAttribute("OrigTransparency", 0.3)
+    AddCorner(label, Theme.CornerRadiusTiny)
+    return label
+end
+
+local function CreateDropdown(parent, name, options, default, callback, layoutOrder)
+    local container = Instance.new("Frame")
+    container.Name = name .. "Dropdown"
+    container.BackgroundColor3 = Theme.ButtonBg
+    container.BorderSizePixel = 0
+    container.Size = UDim2.new(1, 0, 0, 46)
+    container.ZIndex = 3
+    container.LayoutOrder = layoutOrder or 0
+    container.ClipsDescendants = false
+    container.Parent = parent
+    container:SetAttribute("OrigTransparency", 0)
+    AddCorner(container, Theme.CornerRadiusSmall)
+    AddStroke(container, Theme.Accent, 1, 0.9)
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size = UDim2.new(0.5, -10, 1, 0)
+    nameLabel.Position = UDim2.new(0, 14, 0, 0)
+    nameLabel.Font = Theme.Font
+    nameLabel.Text = name
+    nameLabel.TextColor3 = Theme.Text
+    nameLabel.TextSize = 13
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.ZIndex = 4
+    nameLabel.Parent = container
+
+    local selectedBtn = Instance.new("TextButton")
+    selectedBtn.BackgroundColor3 = Theme.InputBg
+    selectedBtn.Size = UDim2.new(0, 130, 0, 30)
+    selectedBtn.Position = UDim2.new(1, -142, 0.5, -15)
+    selectedBtn.Font = Theme.Font
+    selectedBtn.Text = default .. " ▼"
+    selectedBtn.TextColor3 = Theme.Accent
+    selectedBtn.TextSize = 12
+    selectedBtn.ZIndex = 5
+    selectedBtn.AutoButtonColor = false
+    selectedBtn.BorderSizePixel = 0
+    selectedBtn.Parent = container
+    AddCorner(selectedBtn, Theme.CornerRadiusTiny)
+
+    local ddOpen = false
+    local ddFrame = Instance.new("Frame")
+    ddFrame.BackgroundColor3 = Theme.InputBg
+    ddFrame.BorderSizePixel = 0
+    ddFrame.Size = UDim2.new(0, 130, 0, #options * 28 + 6)
+    ddFrame.Position = UDim2.new(1, -142, 1, 4)
+    ddFrame.Visible = false
+    ddFrame.ZIndex = 20
+    ddFrame.Parent = container
+    AddCorner(ddFrame, Theme.CornerRadiusTiny)
+    AddStroke(ddFrame, Theme.Accent, 1, 0.5)
+
+    local ddLayout = Instance.new("UIListLayout")
+    ddLayout.Padding = UDim.new(0, 2)
+    ddLayout.Parent = ddFrame
+    AddPadding(ddFrame, 3, 3, 3, 3)
+
+    local selected = default
+
+    for _, option in ipairs(options) do
+        local optBtn = Instance.new("TextButton")
+        optBtn.BackgroundColor3 = Theme.ButtonBg
+        optBtn.BackgroundTransparency = 0.3
+        optBtn.Size = UDim2.new(1, 0, 0, 26)
+        optBtn.Font = Theme.Font
+        optBtn.Text = option
+        optBtn.TextColor3 = (option == default) and Theme.Accent or Theme.TextDim
+        optBtn.TextSize = 11
+        optBtn.ZIndex = 21
+        optBtn.AutoButtonColor = false
+        optBtn.BorderSizePixel = 0
+        optBtn.Parent = ddFrame
+        AddCorner(optBtn, Theme.CornerRadiusTiny)
+
+        optBtn.MouseEnter:Connect(function()
+            SafeTween(optBtn, TweenInfo.new(0.1), {BackgroundTransparency = 0})
+        end)
+        optBtn.MouseLeave:Connect(function()
+            SafeTween(optBtn, TweenInfo.new(0.1), {BackgroundTransparency = 0.3})
+        end)
+
+        optBtn.MouseButton1Click:Connect(function()
+            selected = option
+            selectedBtn.Text = option .. " ▼"
+            ddFrame.Visible = false
+            ddOpen = false
+            for _, child in ipairs(ddFrame:GetChildren()) do
+                if child:IsA("TextButton") then
+                    child.TextColor3 = (child.Text == option) and Theme.Accent or Theme.TextDim
+                end
+            end
+            pcall(callback, option)
+        end)
+    end
+
+    selectedBtn.MouseButton1Click:Connect(function()
+        ddOpen = not ddOpen
+        ddFrame.Visible = ddOpen
+    end)
+
+    return container
+end
+
+-- ============================================================
+-- CREATE TABS
+-- ============================================================
+local playerBtn = CreateTabButton("Player", "⚡")
+local playerPage = CreateTabPage("Player")
+Tabs["Player"] = {Button = playerBtn, Page = playerPage}
+
+local visualsBtn = CreateTabButton("Visuals", "👁")
+local visualsPage = CreateTabPage("Visuals")
+Tabs["Visuals"] = {Button = visualsBtn, Page = visualsPage}
+
+local spooferBtn = CreateTabButton("Spoofer", "🛡")
+local spooferPage = CreateTabPage("Spoofer")
+Tabs["Spoofer"] = {Button = spooferBtn, Page = spooferPage}
+
+local miscBtn = CreateTabButton("Misc", "⚙")
+local miscPage = CreateTabPage("Misc")
+Tabs["Misc"] = {Button = miscBtn, Page = miscPage}
+
+-- ============================================================
+-- PLAYER TAB
+-- ============================================================
+CreateSection(playerPage, "Character Modifications", 1)
+
+CreateToggle(playerPage, "Infinite Jump", "Jump infinitely in the air", false, function(enabled)
+    State.InfiniteJump = enabled
+end, 2)
+
+CreateToggle(playerPage, "Speed Boost", "Increase walk speed to 50", false, function(enabled)
+    State.SpeedBoost = enabled
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            local h = char:FindFirstChildOfClass("Humanoid")
+            if h then h.WalkSpeed = enabled and 50 or 16 end
+        end
+    end)
+end, 3)
+
+CreateToggle(playerPage, "No Clip", "Walk through walls and objects", false, function(enabled)
+    State.NoClip = enabled
+end, 4)
+
+CreateSection(playerPage, "Movement", 5)
+
+CreateSlider(playerPage, "Walk Speed", 0, 200, 16, " studs/s", function(value)
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            local h = char:FindFirstChildOfClass("Humanoid")
+            if h then h.WalkSpeed = value end
+        end
+    end)
+end, 6)
+
+CreateSlider(playerPage, "Jump Power", 0, 300, 50, " studs", function(value)
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            local h = char:FindFirstChildOfClass("Humanoid")
+            if h then h.JumpPower = value; h.UseJumpPower = true end
+        end
+    end)
+end, 7)
+
+-- ============================================================
+-- VISUALS TAB
+-- ============================================================
+CreateSection(visualsPage, "Camera Settings", 1)
+
+CreateSlider(visualsPage, "Field of View", 30, 120, 70, "°", function(value)
+    State.FOV = value
+    pcall(function() Camera.FieldOfView = value end)
+end, 2)
+
+CreateSlider(visualsPage, "Brightness", 0, 5, 1, "", function(value)
+    State.Brightness = value
+    pcall(function() Lighting.Brightness = value end)
+end, 3)
+
+CreateSlider(visualsPage, "Ambient", 0, 255, 128, "", function(value)
+    pcall(function()
+        local vv = value / 255
+        Lighting.Ambient = Color3.new(vv, vv, vv)
+    end)
+end, 4)
+
+CreateSection(visualsPage, "ESP Settings", 5)
+
+CreateColorPicker(visualsPage, "ESP Highlight Color", State.ESPColor, function(color)
+    State.ESPColor = color
+    for _, obj in pairs(State.ESPObjects) do
+        pcall(function()
+            if obj:IsA("Highlight") then
+                obj.FillColor = color
+                obj.OutlineColor = color
+            end
+        end)
+    end
+end, 6)
+
+CreateToggle(visualsPage, "Player ESP", "Highlight all players with selected color", false, function(enabled)
+    if enabled then
+        pcall(function()
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    local hl = Instance.new("Highlight")
+                    hl.Name = "CatHubESP"
+                    hl.FillColor = State.ESPColor
+                    hl.FillTransparency = 0.6
+                    hl.OutlineColor = State.ESPColor
+                    hl.OutlineTransparency = 0.2
+                    hl.Adornee = player.Character
+                    hl.Parent = player.Character
+                    table.insert(State.ESPObjects, hl)
+                end
+            end
+        end)
+    else
+        CleanupESP()
+    end
+end, 7)
+
+-- ============================================================
+-- SPOOFER TAB
+-- ============================================================
+
+-- Header
+local spooferInfoFrame = Instance.new("Frame")
+spooferInfoFrame.BackgroundColor3 = Color3.fromRGB(20, 12, 35)
+spooferInfoFrame.BorderSizePixel = 0
+spooferInfoFrame.Size = UDim2.new(1, 0, 0, 60)
+spooferInfoFrame.ZIndex = 3
+spooferInfoFrame.LayoutOrder = 0
+spooferInfoFrame.Parent = spooferPage
+spooferInfoFrame:SetAttribute("OrigTransparency", 0)
+AddCorner(spooferInfoFrame, Theme.CornerRadiusSmall)
+AddStroke(spooferInfoFrame, Theme.AccentPurple, 1, 0.5)
+
+local spooferIcon = Instance.new("TextLabel")
+spooferIcon.BackgroundTransparency = 1
+spooferIcon.Size = UDim2.new(0, 30, 0, 30)
+spooferIcon.Position = UDim2.new(0, 12, 0, 15)
+spooferIcon.Font = Theme.FontBold
+spooferIcon.Text = "🐱"
+spooferIcon.TextSize = 22
+spooferIcon.ZIndex = 4
+spooferIcon.Parent = spooferInfoFrame
+
+local spooferTitle = Instance.new("TextLabel")
+spooferTitle.BackgroundTransparency = 1
+spooferTitle.Size = UDim2.new(1, -60, 0, 18)
+spooferTitle.Position = UDim2.new(0, 46, 0, 10)
+spooferTitle.Font = Theme.FontBold
+spooferTitle.Text = "CatHub Jump Spoofer"
+spooferTitle.TextColor3 = Theme.AccentPurple
+spooferTitle.TextSize = 14
+spooferTitle.TextXAlignment = Enum.TextXAlignment.Left
+spooferTitle.ZIndex = 4
+spooferTitle.Parent = spooferInfoFrame
+
+local spooferDesc = Instance.new("TextLabel")
+spooferDesc.BackgroundTransparency = 1
+spooferDesc.Size = UDim2.new(1, -60, 0, 14)
+spooferDesc.Position = UDim2.new(0, 46, 0, 32)
+spooferDesc.Font = Theme.FontLight
+spooferDesc.Text = "Spoofed jumps for " .. DisplayGameName
+spooferDesc.TextColor3 = Theme.TextMuted
+spooferDesc.TextSize = 10
+spooferDesc.TextXAlignment = Enum.TextXAlignment.Left
+spooferDesc.ZIndex = 4
+spooferDesc.Parent = spooferInfoFrame
+
+CreateSection(spooferPage, "Core Settings", 1)
+
+CreateToggle(spooferPage, "Enable Jump Spoofer", "Intercepts jumps to avoid anti-cheat detection", false, function(enabled)
+    if enabled then JumpSpoofer.Enable() else JumpSpoofer.Disable() end
+end, 2)
+
+CreateDropdown(spooferPage, "Spoof Method", {"Velocity", "CFrame", "Hybrid"}, "Velocity", function(method)
+    State.JumpSpoofer.Method = method
+end, 3)
+
+CreateSlider(spooferPage, "Jump Strength", 10, 120, 50, "", function(value)
+    State.JumpSpoofer.SpoofStrength = value
+end, 4)
+
+CreateSection(spooferPage, "Anti-Detection", 5)
+
+CreateDropdown(spooferPage, "Anti-Detect Level", {"1 - Low", "2 - Medium", "3 - High"}, "3 - High", function(option)
+    State.JumpSpoofer.AntiDetectLevel = tonumber(option:sub(1, 1))
+end, 6)
+
+CreateSlider(spooferPage, "Max Air Time", 100, 800, 400, "ms", function(value)
+    State.JumpSpoofer.MaxSafeAirTime = value / 1000
+end, 7)
+
+CreateSlider(spooferPage, "Jump Cooldown", 30, 300, 80, "ms", function(value)
+    State.JumpSpoofer.CooldownTime = value / 1000
+end, 8)
+
+CreateSlider(spooferPage, "Ground Offset", 0, 200, 50, "cm", function(value)
+    State.JumpSpoofer.GroundOffset = value / 100
+end, 9)
+
+CreateSection(spooferPage, "Advanced", 10)
+
+CreateToggle(spooferPage, "Suppress Jump Anim", "Prevents jump animation during spoof", true, function() end, 11)
+CreateToggle(spooferPage, "Force Ground State", "Forces humanoid to report grounded", true, function(enabled)
+    if not enabled then JumpSpoofer.RestoreHumanoidState() end
+end, 12)
+CreateToggle(spooferPage, "Zero Vertical Velocity", "Zeros Y velocity sent to server", true, function() end, 13)
+
+CreateSection(spooferPage, "Live Status", 14)
+
+local spooferStatusFrame = Instance.new("Frame")
+spooferStatusFrame.BackgroundColor3 = Theme.ButtonBg
+spooferStatusFrame.BorderSizePixel = 0
+spooferStatusFrame.Size = UDim2.new(1, 0, 0, 100)
+spooferStatusFrame.ZIndex = 3
+spooferStatusFrame.LayoutOrder = 15
+spooferStatusFrame.Parent = spooferPage
+spooferStatusFrame:SetAttribute("OrigTransparency", 0)
+AddCorner(spooferStatusFrame, Theme.CornerRadiusSmall)
+AddStroke(spooferStatusFrame, Theme.AccentPurple, 1, 0.7)
+
+local spooferStatusText = Instance.new("TextLabel")
+spooferStatusText.Name = "StatusText"
+spooferStatusText.BackgroundTransparency = 1
+spooferStatusText.Size = UDim2.new(1, -20, 1, -10)
+spooferStatusText.Position = UDim2.new(0, 10, 0, 5)
+spooferStatusText.Font = Enum.Font.Code
+spooferStatusText.TextColor3 = Theme.TextDim
+spooferStatusText.TextSize = 10
+spooferStatusText.TextXAlignment = Enum.TextXAlignment.Left
+spooferStatusText.TextYAlignment = Enum.TextYAlignment.Top
+spooferStatusText.TextWrapped = true
+spooferStatusText.ZIndex = 4
+spooferStatusText.Parent = spooferStatusFrame
+
+local statusDot = Instance.new("Frame")
+statusDot.BackgroundColor3 = Theme.Error
+statusDot.BorderSizePixel = 0
+statusDot.Size = UDim2.new(0, 8, 0, 8)
+statusDot.Position = UDim2.new(1, -18, 0, 8)
+statusDot.ZIndex = 5
+statusDot.Parent = spooferStatusFrame
+AddCorner(statusDot, UDim.new(1, 0))
+
+-- Live status update
+task.spawn(function()
+    while task.wait(0.25) do
+        pcall(function()
+            if not spooferStatusText or not spooferStatusText.Parent then return end
+            local sp = State.JumpSpoofer
+            spooferStatusText.Text = table.concat({
+                "Status:      " .. (sp.Enabled and "● ACTIVE" or "○ INACTIVE"),
+                "Method:      " .. sp.Method,
+                "Game:        " .. DisplayGameName,
+                "In Match:    " .. (sp.IsInMatch and "Yes" or "Scanning..."),
+                "Jumps:       " .. sp.JumpCount .. " total / " .. sp.SpoofedJumps .. " spoofed",
+                "Air Time:    " .. string.format("%.0fms", sp.AirTimeAccumulator * 1000),
+                "Anti-Detect: Level " .. sp.AntiDetectLevel,
+                "Grounded:    " .. (JumpSpoofer.IsGrounded() and "Yes ✓" or "No ✗"),
+            }, "\n")
+
+            statusDot.BackgroundColor3 = sp.Enabled
+                and (sp.AirTimeAccumulator > sp.MaxSafeAirTime and Theme.Warning or Theme.Success)
+                or Theme.Error
+
+            SafeTween(statusDot, TweenInfo.new(0.15), {BackgroundTransparency = 0.3})
+            task.delay(0.12, function()
+                if statusDot and statusDot.Parent then
+                    SafeTween(statusDot, TweenInfo.new(0.15), {BackgroundTransparency = 0})
+                end
+            end)
+        end)
+    end
+end)
+
+-- ============================================================
+-- MISC TAB
+-- ============================================================
+CreateSection(miscPage, "Script Executor", 1)
+
+local _, scriptInput = CreateTextInput(miscPage, "-- Paste your Lua script here...", true, 2)
+
+CreateButton(miscPage, "Execute Script", "Run the script in the text box above", function()
+    local code = scriptInput.Text
+    if code == "" then return end
+    local sl = miscPage:FindFirstChild("StatusLabel")
+    if sl then sl.Text = "● Executing..."; sl.TextColor3 = Theme.Warning end
+    local success, err = pcall(function()
+        if loadstring then
+            local fn, le = loadstring(code)
+            if fn then fn() else error(le) end
+        end
+    end)
+    task.delay(0.5, function()
+        if sl then
+            if success then
+                sl.Text = "● Executed Successfully"
+                sl.TextColor3 = Theme.Success
+            else
+                sl.Text = "● Error: " .. tostring(err):sub(1, 50)
+                sl.TextColor3 = Theme.Error
+            end
+            task.delay(3, function()
+                if sl and sl.Parent then sl.Text = "● Ready"; sl.TextColor3 = Theme.Success end
+            end)
+        end
+    end)
+end, 3)
+
+CreateStatusLabel(miscPage, 4)
+
+CreateSection(miscPage, "Quick Actions", 5)
+
+CreateButton(miscPage, "Rejoin Server", "Leave and rejoin the current server", function()
+    pcall(function() game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer) end)
+end, 6)
+
+CreateButton(miscPage, "Server Hop", "Join a different server instance", function()
+    pcall(function()
+        local ts = game:GetService("TeleportService")
+        local hs = game:GetService("HttpService")
+        local servers = hs:JSONDecode(
+            game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+        )
+        if servers and servers.data then
+            for _, server in ipairs(servers.data) do
+                if server.id ~= game.JobId and server.playing < server.maxPlayers then
+                    ts:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
+                    return
+                end
+            end
+        end
+    end)
+end, 7)
+
+CreateButton(miscPage, "Reset Character", "Force reset your character", function()
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            local h = char:FindFirstChildOfClass("Humanoid")
+            if h then h.Health = 0 end
+        end
+    end)
+end, 8)
+
+CreateSection(miscPage, "Information", 9)
+
+local infoFrame = Instance.new("Frame")
+infoFrame.BackgroundColor3 = Theme.ButtonBg
+infoFrame.BorderSizePixel = 0
+infoFrame.Size = UDim2.new(1, 0, 0, 80)
+infoFrame.ZIndex = 3
+infoFrame.LayoutOrder = 10
+infoFrame.Parent = miscPage
+infoFrame:SetAttribute("OrigTransparency", 0)
+AddCorner(infoFrame, Theme.CornerRadiusSmall)
+
+local infoText = Instance.new("TextLabel")
+infoText.BackgroundTransparency = 1
+infoText.Size = UDim2.new(1, -20, 1, -10)
+infoText.Position = UDim2.new(0, 10, 0, 5)
+infoText.Font = Theme.FontLight
+infoText.TextColor3 = Theme.TextDim
+infoText.TextSize = 11
+infoText.TextXAlignment = Enum.TextXAlignment.Left
+infoText.TextYAlignment = Enum.TextYAlignment.Top
+infoText.TextWrapped = true
+infoText.ZIndex = 4
+infoText.Parent = infoFrame
+
+task.spawn(function()
+    while task.wait(1) do
+        pcall(function()
+            if not infoText or not infoText.Parent then return end
+            local fps = math.floor(1 / RunService.RenderStepped:Wait())
+            local ping = "N/A"
+            pcall(function() ping = tostring(math.floor(LocalPlayer:GetNetworkPing() * 1000)) .. "ms" end)
+            infoText.Text = string.format(
+                "🐱 CatHub V2.1\nFPS: %d  |  Ping: %s\nPlayer: %s\nGame: %s (ID: %d)",
+                fps, ping, LocalPlayer.Name, GameName, game.PlaceId
+            )
+        end)
+    end
+end)
+
+-- ============================================================
+-- TAB SWITCHING
+-- ============================================================
+for name, data in pairs(Tabs) do
+    data.Button.MouseButton1Click:Connect(function() SwitchTab(name) end)
+end
+SwitchTab("Player")
+
+-- ============================================================
+-- MINIMIZE / CLOSE
+-- ============================================================
+MinimizeBtn.MouseButton1Click:Connect(function()
+    State.Minimized = not State.Minimized
+    if State.Minimized then
+        CreateTween(MainFrame, Theme.AnimSpeed, {
+            Size = UDim2.new(0, MainFrame.Size.X.Offset, 0, 44),
+        }, Enum.EasingStyle.Back):Play()
+        SafeTween(ShadowFrame, TweenInfo.new(Theme.AnimSpeed), {
+            Size = UDim2.new(0, MainFrame.Size.X.Offset + 60, 0, 104),
+        })
+        MinimizeBtn.Text = "+"
+        ContentArea.Visible = false
+    else
+        ContentArea.Visible = true
+        CreateTween(MainFrame, Theme.AnimSpeed, {
+            Size = State.WindowSize,
+        }, Enum.EasingStyle.Back):Play()
+        SafeTween(ShadowFrame, TweenInfo.new(Theme.AnimSpeed), {
+            Size = UDim2.new(0, State.WindowSize.X.Offset + 60, 0, State.WindowSize.Y.Offset + 60),
+        })
+        MinimizeBtn.Text = "–"
+    end
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    JumpSpoofer.Disable()
+    local tween = CreateTween(MainFrame, 0.3, {
+        Size = UDim2.new(0, MainFrame.Size.X.Offset, 0, 0),
+        BackgroundTransparency = 1,
+    })
+    tween:Play()
+    SafeTween(ShadowFrame, TweenInfo.new(0.3), {ImageTransparency = 1})
+    tween.Completed:Connect(function()
+        CleanupConnections()
+        CleanupESP()
+        pcall(function()
+            local char = LocalPlayer.Character
+            if char then
+                local h = char:FindFirstChildOfClass("Humanoid")
+                if h then
+                    h.WalkSpeed = 16
+                    h.JumpPower = 50
+                    h:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+                    h:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+                end
+            end
+            Camera.FieldOfView = 70
+        end)
+        ScreenGui:Destroy()
+    end)
+end)
+
+-- ============================================================
+-- RESIZE GRIP
+-- ============================================================
+local ResizeGrip = Instance.new("TextButton")
+ResizeGrip.BackgroundTransparency = 1
+ResizeGrip.Size = UDim2.new(0, 20, 0, 20)
+ResizeGrip.Position = UDim2.new(1, -20, 1, -20)
+ResizeGrip.Text = "⋱"
+ResizeGrip.TextColor3 = Theme.TextMuted
+ResizeGrip.TextSize = 16
+ResizeGrip.Font = Theme.FontBold
+ResizeGrip.ZIndex = 10
+ResizeGrip.AutoButtonColor = false
+ResizeGrip.BorderSizePixel = 0
+ResizeGrip.Parent = MainFrame
+
+do
+    local resizing = false
+    local resizeStart, startSize
+
+    ResizeGrip.MouseButton1Down:Connect(function()
+        resizing = true
+        resizeStart = UserInputService:GetMouseLocation()
+        startSize = MainFrame.AbsoluteSize
+    end)
+
+    local rm = UserInputService.InputChanged:Connect(function(input)
+        if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement
+                         or input.UserInputType == Enum.UserInputType.Touch) then
+            local mp = UserInputService:GetMouseLocation()
+            local delta = mp - resizeStart
+            local nw = math.clamp(startSize.X + delta.X, State.MinWindowSize.X, State.MaxWindowSize.X)
+            local nh = math.clamp(startSize.Y + delta.Y, State.MinWindowSize.Y, State.MaxWindowSize.Y)
+            MainFrame.Size = UDim2.new(0, nw, 0, nh)
+            State.WindowSize = MainFrame.Size
+            ShadowFrame.Size = UDim2.new(0, nw + 60, 0, nh + 60)
+        end
+    end)
+    table.insert(State.Connections, rm)
+
+    local ru = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            resizing = false
+        end
+    end)
+    table.insert(State.Connections, ru)
+
+    ResizeGrip.MouseEnter:Connect(function()
+        SafeTween(ResizeGrip, TweenInfo.new(Theme.AnimSpeedFast), {TextColor3 = Theme.Accent})
+    end)
+    ResizeGrip.MouseLeave:Connect(function()
+        SafeTween(ResizeGrip, TweenInfo.new(Theme.AnimSpeedFast), {TextColor3 = Theme.TextMuted})
+    end)
+end
+
+-- ============================================================
+-- GAME LOOPS
+-- ============================================================
+
+local jumpConn = UserInputService.JumpRequest:Connect(function()
+    if State.JumpSpoofer.Enabled then
+        JumpSpoofer.ExecuteJump()
+    elseif State.InfiniteJump then
+        pcall(function()
+            local char = LocalPlayer.Character
+            if char then
+                local h = char:FindFirstChildOfClass("Humanoid")
+                if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+            end
+        end)
+    end
+end)
+table.insert(State.Connections, jumpConn)
+
+local ncConn = RunService.Stepped:Connect(function()
+    if State.NoClip then
+        pcall(function()
+            local char = LocalPlayer.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then part.CanCollide = false end
+                end
+            end
+        end)
+    end
+end)
+table.insert(State.Connections, ncConn)
+
+-- ============================================================
+-- KEYBIND
+-- ============================================================
+local toggleConn = UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end)
+table.insert(State.Connections, toggleConn)
+
+-- ============================================================
+-- NOTIFICATION SYSTEM
+-- ============================================================
+local function ShowNotification(message, duration, color)
+    pcall(function()
+        local notif = Instance.new("Frame")
+        notif.BackgroundColor3 = Theme.TitleBar
+        notif.BackgroundTransparency = 0.1
+        notif.Size = UDim2.new(0, 320, 0, 48)
+        notif.Position = UDim2.new(1, 330, 1, -65)
+        notif.ZIndex = 100
+        notif.BorderSizePixel = 0
+        notif.Parent = ScreenGui
+        AddCorner(notif, Theme.CornerRadiusSmall)
+        AddStroke(notif, color or Theme.Accent, 1, 0.5)
+
+        local nt = Instance.new("TextLabel")
+        nt.BackgroundTransparency = 1
+        nt.Size = UDim2.new(1, -16, 1, 0)
+        nt.Position = UDim2.new(0, 8, 0, 0)
+        nt.Font = Theme.Font
+        nt.Text = message
+        nt.TextColor3 = color or Theme.Accent
+        nt.TextSize = 12
+        nt.TextWrapped = true
+        nt.ZIndex = 101
+        nt.Parent = notif
+
+        SafeTween(notif, TweenInfo.new(0.4, Enum.EasingStyle.Back), {
+            Position = UDim2.new(1, -330, 1, -65),
+        })
+        task.delay(duration or 3, function()
+            SafeTween(notif, TweenInfo.new(0.3), {
+                Position = UDim2.new(1, 330, 1, -65),
+            })
+            task.delay(0.4, function()
+                if notif and notif.Parent then notif:Destroy() end
+            end)
+        end)
+    end)
+end
+
+-- ============================================================
+-- OPENING ANIMATION
+-- ============================================================
+do
+    MainFrame.Size = UDim2.new(0, 580, 0, 0)
+    MainFrame.BackgroundTransparency = 0.5
+    ShadowFrame.ImageTransparency = 1
+
+    task.delay(0.1, function()
+        CreateTween(MainFrame, 0.5, {
+            Size = State.WindowSize,
+            BackgroundTransparency = 0,
+        }, Enum.EasingStyle.Back):Play()
+        SafeTween(ShadowFrame, TweenInfo.new(0.6), {ImageTransparency = 0.4})
+        task.delay(0.2, function() ContentArea.Visible = true end)
+    end)
+end
+
+-- ============================================================
+-- WATERMARK
+-- ============================================================
+local Watermark = Instance.new("TextLabel")
+Watermark.BackgroundColor3 = Theme.TitleBar
+Watermark.BackgroundTransparency = 0.3
+Watermark.Size = UDim2.new(0, 320, 0, 26)
+Watermark.Position = UDim2.new(1, -330, 0, 10)
+Watermark.Font = Theme.Font
+Watermark.Text = "🐱 " .. HubTitle .. " | RShift to toggle"
+Watermark.TextColor3 = Theme.TextDim
+Watermark.TextSize = 10
+Watermark.ZIndex = 10
+Watermark.BorderSizePixel = 0
+Watermark.Parent = ScreenGui
+AddCorner(Watermark, Theme.CornerRadiusTiny)
+
+task.delay(6, function()
+    pcall(function()
+        SafeTween(Watermark, TweenInfo.new(1), {BackgroundTransparency = 1, TextTransparency = 1})
+        task.delay(1.1, function()
+            if Watermark and Watermark.Parent then Watermark:Destroy() end
+        end)
+    end)
+end)
+
+-- Welcome notifications
+task.delay(0.8, function()
+    ShowNotification("🐱 " .. HubTitle .. " loaded!", 3, Theme.Success)
+    task.delay(1.5, function()
+        ShowNotification("🛡 Jump Spoofer ready — switch to Spoofer tab", 4, Theme.AccentPurple)
+    end)
+end)
+
+print("[CatHub V2.1] Loaded for: " .. GameName .. " | Press RShift to toggle | Jump Spoofer ready")
